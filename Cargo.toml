@@ -1,0 +1,30 @@
+[package]
+name = "rdirstat"
+version = "0.1.0"
+edition = "2021"
+description = "A modern, high-performance disk usage analyzer"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+tokio = { version = "1.0", features = ["full"] }
+rayon = "1.7"
+crossbeam = "0.8"
+tui = { version = "0.19", features = ["crossterm"] }
+crossterm = "0.26"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+humansize = "2.1"
+clap = { version = "4.0", features = ["derive"] }
+ignore = "0.4"
+libc = "0.2"
+nix = "0.26"
+num_cpus = "1.16"
+thiserror = "1.0"
+
+[dev-dependencies]
+criterion = "0.5"
+tempfile = "3.3"
+
+[[bench]]
+name = "scanner_bench"
+harness = false
