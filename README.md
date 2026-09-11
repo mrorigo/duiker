@@ -61,7 +61,7 @@ cargo install duiker
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/your-username/duiker.git
+    git clone https://github.com/mrorigo/duiker.git
     cd duiker
     ```
 2.  **Build and install:**
