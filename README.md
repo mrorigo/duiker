@@ -11,11 +11,13 @@ A modern, high-performance disk usage analyzer for the terminal. `rdirstat` prov
 ## ✨ Features
 
 -   **Blazing Fast Scans:** Built with Rust, leveraging multi-threading and inode caching for exceptional performance on large directories.
--   **Interactive TUI:** A responsive and intuitive Text User Interface (TUI) for real-time visualization and navigation of your file system.
-    -   **Tree View:** Hierarchical breakdown of directories and files with their sizes.
-    -   **Chart View:** Visualizes size distribution by file type and overall usage summary.
-    -   **Details View:** Lists files and directories with more detailed information.
-    -   **Treemap Visualization:** A simplified, character-based treemap for immediate visual understanding of space hogs.
+-   **Interactive TUI:** A Text User Interface (TUI) for scanning and navigating one directory tree.
+    -   **Tree View:** Lists the current directory's children, sorted by size by default.
+    -   **Selection Details:** Shows the selected item's full path, type, allocated size, share of the current directory, and child count.
+    -   **Chart View:** Shows file-type size distribution and an overall usage summary.
+    -   **Details View:** Shows the current directory as a table with name, size, and type columns.
+    -   **Treemap View:** Shows a text-based size comparison of the current directory's largest children.
+    -   **Navigation:** Supports directory entry, parent navigation, name filtering, and sorting by size or name.
 -   **Flexible CLI:** Perform quick scans and output results in various formats directly to the console or a file.
 -   **Configurable Scanning:**
     -   Follow symbolic links (`--follow-links`).
@@ -26,6 +28,12 @@ A modern, high-performance disk usage analyzer for the terminal. `rdirstat` prov
     -   (Future: Custom ignore patterns via `.gitignore` or similar mechanism).
 -   **Human-Readable Output:** Sizes are displayed in intuitive units (KB, MB, GB, etc.).
 -   **JSON Export:** Programmatically access scan results for scripting and integration.
+
+## Performance
+
+An observed scan completed in 7.35 seconds after processing 159.3 GB, 875,319 files, and 74,395 directories.
+
+This result is a real-world observation, not a benchmark guarantee. Scan time depends on the filesystem, storage device, directory structure, permissions, hidden-file settings, and thread count.
 
 ## 🚀 Installation
 
@@ -96,13 +104,13 @@ rdirstat interactive
 | `1`, `2`, `3`, `4` | Switch between Tree, Chart, Details, and Treemap views. |
 | `↑`, `↓`  | Navigate up/down in lists.               |
 | `Page Up`, `Page Down` | Scroll pages in lists.                 |
-| `Enter`   | Enter a selected directory.              |
-| `Backspace` | Go up to the parent directory.           |
-| `/`       | Filter the current directory by name.    |
+| `/`       | Start filtering the current directory by name; type the query. |
 | `s`       | Toggle sorting by size and name.         |
-| `Esc`     | Leave filter input mode.                 |
+| `Enter`   | Enter the selected directory, or finish filter input. |
+| `Esc`     | Leave filter input mode without clearing the query. |
+| `Backspace` | Go up normally, or erase one filter character while filtering. |
 | `q`       | Quit the application.                    |
-| `?`       | Show help (prints to console).           |
+| `?`       | Print the key reference to the terminal. |
 
 *(A GIF demonstrating the TUI would go here!)*
 
@@ -160,22 +168,19 @@ rdirstat export --format json --output srv_data_summary.json /srv/data
 
 ### Tree Output (Default)
 
-Provides a human-readable, indented tree structure of your directories and files with their cumulative sizes.
+Provides a human-readable tree structure with ASCII connectors, cumulative sizes, and percentages relative to each parent.
 
 ```
-/path/to/directory
-  .git/ 4.5 MiB
-    objects/ 3.2 MiB
-      pack/ 2.8 MiB
-      ...
-  src/ 2.1 MiB
-    main.rs 1.2 MiB
-    lib.rs 900 KiB
-  target/ 150 MiB
-    debug/ 140 MiB
-      rdirstat 80 MiB
-      ...
-  README.md 5.3 KiB
+Path: /path/to/directory
+Used: 159.3 GiB · 875,319 files · 74,395 dirs
+
+SIZE       %       NAME
+   4.5 MiB 100%  .git/
+   3.2 MiB  71%  |-- objects/
+   2.8 MiB  87%  |   \-- pack/
+  2.1 MiB  47%  src/
+   1.2 MiB  57%  |-- main.rs
+ 900 KiB    43%  \-- lib.rs
 ```
 
 ### JSON Output (`--json` or `export --format json`)
@@ -194,7 +199,7 @@ Outputs a JSON object for one path, or an array of objects when multiple paths a
 ## 🛣️ Roadmap
 
 -   Full JSON export of the entire file tree.
--   More advanced TUI features (filtering, sorting within TUI, deletion).
+-   TUI actions such as copying a selected path or opening it in the host file manager.
 -   Integration with `.gitignore` for automatic ignore patterns.
 -   Support for Windows (currently Unix-specific for `dev()` and `ino()`).
 -   Configurable size units (binary/decimal).
