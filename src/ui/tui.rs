@@ -10,7 +10,7 @@ use crossterm::{
 };
 use tui::{backend::CrosstermBackend, Terminal};
 
-use crate::scanner::{ScanConfig, ScanProgress, Scanner};
+use crate::scanner::{ScanConfig, ScanProgress, ScanUpdate, Scanner};
 use crate::tree::{FileTree, TreeNode};
 
 pub use super::components::*;
@@ -37,7 +37,7 @@ pub struct App {
     pub current_node: Option<Arc<RwLock<TreeNode>>>,
     pub node_stack: Vec<Arc<RwLock<TreeNode>>>,
     // Async scanning
-    pub progress_receiver: Option<crossbeam::channel::Receiver<ScanProgress>>,
+    pub progress_receiver: Option<crossbeam::channel::Receiver<ScanUpdate>>,
     // Store the scan config for consistent behavior
     pub scan_config: ScanConfig,
 }
@@ -68,7 +68,6 @@ impl App {
             total_size: 0,
             current_path: Some(self.current_path.clone()),
             elapsed: Duration::from_secs(0),
-            is_complete: false,
         });
 
         let path = self.current_path.clone();
@@ -91,15 +90,15 @@ impl App {
 
     pub fn update_progress(&mut self) {
         if let Some(ref progress_rx) = self.progress_receiver {
-            while let Ok(progress) = progress_rx.try_recv() {
-                self.scan_progress = Some(progress.clone());
-                if progress.is_complete {
-                    self.is_scanning = false;
-                    // When scan completes, build the final tree with the same config
-                    let scanner = Scanner::new(self.scan_config.clone());
-                    if let Ok(tree) = scanner.scan(&self.current_path) {
+            while let Ok(update) = progress_rx.try_recv() {
+                match update {
+                    ScanUpdate::Progress(progress) => self.scan_progress = Some(progress),
+                    ScanUpdate::Complete(tree) => {
+                        self.is_scanning = false;
+                        self.progress_receiver = None;
+                        self.current_node = Some(tree.root.clone());
                         self.tree = Some(tree);
-                        self.current_node = self.tree.as_ref().map(|t| t.root.clone());
+                        break;
                     }
                 }
             }
@@ -318,7 +317,6 @@ fn run_app_loop<B: tui::backend::Backend>(
                         total_size: 0,
                         current_path: Some(app.current_path.clone()),
                         elapsed: Duration::from_secs(0),
-                        is_complete: false,
                     };
                     render_scan_progress(f, &progress, f.size());
                 }

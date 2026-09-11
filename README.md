@@ -19,7 +19,7 @@ A modern, high-performance disk usage analyzer for the terminal. `rdirstat` prov
 -   **Flexible CLI:** Perform quick scans and output results in various formats directly to the console or a file.
 -   **Configurable Scanning:**
     -   Follow symbolic links (`--follow-links`).
-    -   Ignore hidden files and directories (`--no-hidden`).
+    -   Include hidden files and directories when needed (`--hidden`).
     -   Limit scan depth (`--depth`).
     -   Adjust thread count (`--threads`).
     -   (Future: Custom ignore patterns via `.gitignore` or similar mechanism).
@@ -108,11 +108,11 @@ rdirstat [OPTIONS] [PATH]
 | :---- | :-------------- | :------------------------------------------- | :----------- |
 | `-j`  | `--json`        | Output results in JSON format.               | `false`      |
 | `-L`  | `--follow-links`| Follow symbolic links.                       | `false`      |
-| `-H`  | `--no-hidden`   | Ignore hidden files and directories.         | `true`       |
+| `-H`  | `--hidden`      | Include hidden files and directories.        | `false`      |
 | `-d`  | `--depth <INT>` | Maximum depth for scanning.                  | `None` (full) |
 | `-t`  | `--threads <INT>` | Number of threads to use for scanning.       | `num_cpus`   |
 
-**Example: Scan with custom depth and ignore hidden, then output JSON**
+**Example: Scan with custom depth, including hidden files, then output JSON**
 
 ```bash
 rdirstat -d 3 -H --json /home/user/myproject

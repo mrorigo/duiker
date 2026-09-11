@@ -2,7 +2,7 @@ use tui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Span, Spans},
+    text::Spans,
     widgets::{Block, Borders, Paragraph, Row, Table, Tabs, Wrap},
     Frame,
 };
@@ -89,7 +89,7 @@ pub fn render_status_bar<B: Backend>(f: &mut Frame<B>, app: &App, area: Rect) {
 
 pub fn render_main_content<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
     if app.tree.is_none() && !app.is_scanning {
-        render_no_data(f, area);
+        render_no_data(f, app.error_message.as_deref(), area);
         return;
     }
 
@@ -101,11 +101,14 @@ pub fn render_main_content<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Re
     }
 }
 
-fn render_no_data<B: Backend>(f: &mut Frame<B>, area: Rect) {
-    let message = "No scan data available. Run a scan first.";
+fn render_no_data<B: Backend>(f: &mut Frame<B>, error_message: Option<&str>, area: Rect) {
+    let (title, message) = match error_message {
+        Some(message) => ("Scan Error", message),
+        None => ("No Data", "No scan data available. Run a scan first."),
+    };
 
     let paragraph = Paragraph::new(message)
-        .block(Block::default().title("No Data").borders(Borders::ALL))
+        .block(Block::default().title(title).borders(Borders::ALL))
         .wrap(Wrap { trim: true })
         .style(Style::default().fg(Color::Yellow));
 
@@ -147,7 +150,10 @@ fn render_file_tree<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
     f.render_widget(table, area);
 }
 
-fn build_tree_table(children: &[Arc<RwLock<TreeNode>>], selected_index: usize) -> (Row, Vec<Row>) {
+fn build_tree_table(
+    children: &[Arc<RwLock<TreeNode>>],
+    selected_index: usize,
+) -> (Row<'_>, Vec<Row<'_>>) {
     let header = Row::new(vec![
         "".to_string(), // Selection indicator
         "".to_string(), // Icon
@@ -211,7 +217,7 @@ fn render_size_distribution<B: Backend>(f: &mut Frame<B>, app: &mut App, area: R
     f.render_widget(list, area);
 }
 
-fn build_top_items_list(children: &[Arc<RwLock<TreeNode>>]) -> Vec<Spans> {
+fn build_top_items_list(children: &[Arc<RwLock<TreeNode>>]) -> Vec<Spans<'_>> {
     let mut entries: Vec<(String, u64, bool)> = children
         .iter()
         .map(|child| {
@@ -228,7 +234,7 @@ fn build_top_items_list(children: &[Arc<RwLock<TreeNode>>]) -> Vec<Spans> {
         .collect();
 
     // Sort by size and take top 10
-    entries.sort_by(|a, b| b.1.cmp(&a.1));
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.1));
     entries.truncate(10);
 
     let mut items = Vec::new();
@@ -274,7 +280,10 @@ fn render_details_view<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) 
     f.render_widget(table, area);
 }
 
-fn build_file_table(children: &[Arc<RwLock<TreeNode>>], selected_index: usize) -> (Row, Vec<Row>) {
+fn build_file_table(
+    children: &[Arc<RwLock<TreeNode>>],
+    selected_index: usize,
+) -> (Row<'_>, Vec<Row<'_>>) {
     let header = Row::new(vec![
         "".to_string(), // Selection indicator
         "".to_string(), // Icon
@@ -356,7 +365,11 @@ fn build_size_breakdown_text(node: &Arc<RwLock<TreeNode>>) -> String {
         return "No files found".to_string();
     }
 
-    let total_size: u64 = entries.iter().map(|(_, size, _)| size).sum();
+    let file_entries: Vec<_> = entries
+        .into_iter()
+        .filter(|(_, _, is_directory)| !is_directory)
+        .collect();
+    let total_size: u64 = file_entries.iter().map(|(_, size, _)| size).sum();
     if total_size == 0 {
         return "All files are empty".to_string();
     }
@@ -365,25 +378,20 @@ fn build_size_breakdown_text(node: &Arc<RwLock<TreeNode>>) -> String {
 
     // Group by file type and calculate percentages
     let mut file_types = std::collections::HashMap::new();
-    for (name, size, is_dir) in entries {
-        let category = if is_dir {
-            "Directories".to_string()
+    for (name, size, _) in file_entries {
+        let category = if let Some(ext) = std::path::Path::new(&name).extension() {
+            format!("*.{}", ext.to_string_lossy())
         } else {
-            // Simple file type detection
-            if let Some(ext) = std::path::Path::new(&name).extension() {
-                format!("*.{}", ext.to_string_lossy())
-            } else {
-                "No extension".to_string()
-            }
+            "No extension".to_string()
         };
         *file_types.entry(category).or_insert(0) += size;
     }
 
     let mut sorted_types: Vec<_> = file_types.into_iter().collect();
-    sorted_types.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted_types.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
     for (category, size) in sorted_types.into_iter().take(10) {
-        let percentage = (size * 100) / total_size;
+        let percentage = size.saturating_mul(100) / total_size;
         breakdown.push_str(&format!(
             "{:12} {:>6}% {}\n",
             humansize::format_size(size, humansize::BINARY),
@@ -426,11 +434,7 @@ fn render_usage_summary<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect)
 
     let summary = if let Some(tree) = &app.tree {
         let largest = find_largest_item(&tree.root);
-        let avg_size = if tree.total_files > 0 {
-            tree.total_size / tree.total_files
-        } else {
-            0
-        };
+        let avg_size = tree.total_size.checked_div(tree.total_files).unwrap_or(0);
 
         format!(
             "Total Size: {}\nFiles: {}\nDirectories: {}\nLargest Item: {}\nAverage File Size: {}",
@@ -453,7 +457,7 @@ fn render_usage_summary<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect)
 
 fn find_largest_item(node: &Arc<RwLock<TreeNode>>) -> String {
     let entries = collect_all_entries(node);
-    if let Some((name, size, _)) = entries.into_iter().max_by_key(|(_, size, _)| *size) {
+    if let Some((name, size, _)) = entries.into_iter().skip(1).max_by_key(|(_, size, _)| *size) {
         format!(
             "{} ({})",
             name,
@@ -484,7 +488,20 @@ fn render_treemap_view<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) 
 }
 
 fn build_treemap_visualization(node: &Arc<RwLock<TreeNode>>) -> String {
-    let entries = collect_all_entries(node);
+    let entries: Vec<_> = node
+        .read()
+        .unwrap()
+        .children
+        .iter()
+        .map(|child| {
+            let child = child.read().unwrap();
+            (
+                child.entry.path.display().to_string(),
+                child.entry.size,
+                child.entry.is_directory,
+            )
+        })
+        .collect();
     if entries.is_empty() {
         return "No files to display".to_string();
     }
@@ -501,11 +518,11 @@ fn build_treemap_visualization(node: &Arc<RwLock<TreeNode>>) -> String {
         .into_iter()
         .filter(|(_, size, _)| *size > 0)
         .collect();
-    top_entries.sort_by(|a, b| b.1.cmp(&a.1));
+    top_entries.sort_by_key(|entry| std::cmp::Reverse(entry.1));
     top_entries.truncate(15);
 
     for (name, size, is_dir) in top_entries {
-        let percentage = (size * 100) / total_size;
+        let percentage = size.saturating_mul(100) / total_size;
         let bars = "█".repeat((percentage / 2).max(1) as usize); // 2% per bar
         let icon = if is_dir { "📁" } else { "📄" };
         visualization.push_str(&format!("{} {} {:3}% {}\n", icon, bars, percentage, name));

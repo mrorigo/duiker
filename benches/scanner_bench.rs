@@ -1,6 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use dirstat::scanner::{Scanner, ScanConfig};
-use std::path::Path;
+use rdirstat::scanner::{ScanConfig, Scanner};
 use tempfile::TempDir;
 
 fn create_test_directory() -> TempDir {

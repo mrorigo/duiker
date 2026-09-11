@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
-use crossbeam::channel::{bounded, Receiver};
+use crossbeam::channel::{unbounded, Receiver};
 use ignore::WalkBuilder;
 
 use crate::tree::{FileEntry, FileTree, TreeNode};
@@ -40,7 +40,15 @@ pub struct ScanProgress {
     pub total_size: u64,
     pub current_path: Option<PathBuf>,
     pub elapsed: std::time::Duration,
-    pub is_complete: bool,
+}
+
+/// A scan notification. The completed notification carries the tree produced by
+/// the same worker that reported progress, so interactive mode never needs to
+/// rescan on the UI thread.
+#[derive(Debug)]
+pub enum ScanUpdate {
+    Progress(ScanProgress),
+    Complete(FileTree),
 }
 
 impl Scanner {
@@ -48,14 +56,14 @@ impl Scanner {
         Self { config }
     }
 
-    pub fn scan_with_progress(&self, path: &Path) -> Result<Receiver<ScanProgress>, ScanError> {
+    pub fn scan_with_progress(&self, path: &Path) -> Result<Receiver<ScanUpdate>, ScanError> {
         let start_time = Instant::now();
 
         if !path.exists() {
             return Err(ScanError::PathNotFound(path.to_path_buf()));
         }
 
-        let (progress_tx, progress_rx) = bounded::<ScanProgress>(10); // Small buffer
+        let (progress_tx, progress_rx) = unbounded::<ScanUpdate>();
 
         // Clone the path and config for the thread
         let thread_path = path.to_path_buf();
@@ -63,167 +71,108 @@ impl Scanner {
 
         // Start the scan in a separate thread
         std::thread::spawn(move || {
-            let mut entries = Vec::new();
-            let mut inode_cache = HashMap::new();
-            let mut files_scanned = 0;
-            let mut total_size = 0;
             let mut last_update_time = Instant::now();
             let mut last_files_scanned = 0;
             let mut last_total_size = 0;
-            let update_interval = std::time::Duration::from_millis(500); // Update every 500ms
+            let entries =
+                Self::collect_entries(&thread_path, &config, |files_scanned, total_size, path| {
+                    let now = Instant::now();
+                    let significant_change = files_scanned - last_files_scanned > 1_000
+                        || total_size - last_total_size > 100 * 1024 * 1024;
 
-            let mut walker_builder = WalkBuilder::new(&thread_path);
-            walker_builder
-                .hidden(config.ignore_hidden)
-                .follow_links(config.follow_links)
-                .max_depth(config.max_depth)
-                .threads(config.num_threads.unwrap_or_else(num_cpus::get));
-
-            for pattern in &config.ignore_patterns {
-                walker_builder.add_custom_ignore_filename(pattern);
-            }
-
-            let walker = walker_builder.build();
-
-            for result in walker {
-                match result {
-                    Ok(entry) => {
-                        if let Ok(metadata) = entry.metadata() {
-                            let inode_key = (metadata.dev(), metadata.ino());
-
-                            if inode_cache.contains_key(&inode_key) {
-                                continue;
-                            }
-                            inode_cache.insert(inode_key, metadata.len());
-
-                            let file_entry = FileEntry {
-                                path: entry.path().to_path_buf(),
-                                size: metadata.len(),
-                                is_directory: metadata.is_dir(),
-                                inode: metadata.ino(),
-                                device: metadata.dev(),
-                                file_count: if metadata.is_dir() { 0 } else { 1 },
-                                dir_count: if metadata.is_dir() { 1 } else { 0 },
-                            };
-
-                            files_scanned += 1;
-                            total_size += metadata.len();
-                            entries.push(file_entry);
-
-                            // Only send updates if significant changes occurred or time elapsed
-                            let now = Instant::now();
-                            let significant_change = files_scanned - last_files_scanned > 1000
-                                || total_size - last_total_size > 100 * 1024 * 1024; // 100MB
-
-                            if now.duration_since(last_update_time) > update_interval
-                                || significant_change
-                            {
-                                if progress_tx
-                                    .send(ScanProgress {
-                                        files_scanned,
-                                        total_size,
-                                        current_path: Some(entry.path().to_path_buf()),
-                                        elapsed: start_time.elapsed(),
-                                        is_complete: false,
-                                    })
-                                    .is_err()
-                                {
-                                    // Receiver dropped, stop scanning
-                                    break;
-                                }
-                                last_update_time = now;
-                                last_files_scanned = files_scanned;
-                                last_total_size = total_size;
-                            }
+                    if now.duration_since(last_update_time) >= std::time::Duration::from_millis(500)
+                        || significant_change
+                    {
+                        let update = ScanUpdate::Progress(ScanProgress {
+                            files_scanned,
+                            total_size,
+                            current_path: Some(path.to_path_buf()),
+                            elapsed: start_time.elapsed(),
+                        });
+                        if progress_tx.send(update).is_err() {
+                            return false;
                         }
+                        last_update_time = now;
+                        last_files_scanned = files_scanned;
+                        last_total_size = total_size;
                     }
-                    Err(_) => {
-                        continue;
-                    }
-                }
-            }
+                    true
+                });
 
-            // Send final update with completion flag
-            let _ = progress_tx.send(ScanProgress {
-                files_scanned,
-                total_size,
-                current_path: None,
-                elapsed: start_time.elapsed(),
-                is_complete: true,
-            });
+            let tree = Self::build_tree(&thread_path, entries);
+            let _ = progress_tx.send(ScanUpdate::Complete(tree));
         });
 
         Ok(progress_rx)
     }
 
     pub fn scan(&self, path: &Path) -> Result<FileTree, ScanError> {
-        let start_time = Instant::now();
-
         if !path.exists() {
             return Err(ScanError::PathNotFound(path.to_path_buf()));
+        }
+
+        let entries = Self::collect_entries(path, &self.config, |_, _, _| true);
+        Ok(Self::build_tree(path, entries))
+    }
+
+    fn collect_entries<F>(
+        path: &Path,
+        config: &ScanConfig,
+        mut report_progress: F,
+    ) -> Vec<FileEntry>
+    where
+        F: FnMut(u64, u64, &Path) -> bool,
+    {
+        let mut walker_builder = WalkBuilder::new(path);
+        walker_builder
+            .hidden(config.ignore_hidden)
+            .follow_links(config.follow_links)
+            .max_depth(config.max_depth)
+            .threads(config.num_threads.unwrap_or_else(num_cpus::get));
+
+        for pattern in &config.ignore_patterns {
+            walker_builder.add_custom_ignore_filename(pattern);
         }
 
         let mut entries = Vec::new();
         let mut inode_cache = HashMap::new();
         let mut files_scanned = 0;
-        let mut total_size = 0;
+        let mut total_size: u64 = 0;
 
-        let mut walker_builder = WalkBuilder::new(path);
-        walker_builder
-            .hidden(self.config.ignore_hidden)
-            .follow_links(self.config.follow_links)
-            .max_depth(self.config.max_depth)
-            .threads(self.config.num_threads.unwrap_or_else(num_cpus::get));
+        for entry in walker_builder.build().flatten() {
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            let inode_key = (metadata.dev(), metadata.ino());
+            if inode_cache.contains_key(&inode_key) {
+                continue;
+            }
+            inode_cache.insert(inode_key, ());
 
-        for pattern in &self.config.ignore_patterns {
-            walker_builder.add_custom_ignore_filename(pattern);
-        }
+            // `len` is the logical length. For disk usage, use allocated blocks;
+            // this avoids reporting sparse files as consuming their full virtual size.
+            let size = metadata.blocks().saturating_mul(512);
+            entries.push(FileEntry {
+                path: entry.path().to_path_buf(),
+                size,
+                is_directory: metadata.is_dir(),
+                inode: metadata.ino(),
+                device: metadata.dev(),
+                file_count: u64::from(!metadata.is_dir()),
+                dir_count: u64::from(metadata.is_dir()),
+            });
+            files_scanned += 1;
+            total_size = total_size.saturating_add(size);
 
-        let walker = walker_builder.build();
-
-        for result in walker {
-            match result {
-                Ok(entry) => {
-                    if let Ok(metadata) = entry.metadata() {
-                        let inode_key = (metadata.dev(), metadata.ino());
-
-                        if inode_cache.contains_key(&inode_key) {
-                            continue;
-                        }
-                        inode_cache.insert(inode_key, metadata.len());
-
-                        let file_entry = FileEntry {
-                            path: entry.path().to_path_buf(),
-                            size: metadata.len(),
-                            is_directory: metadata.is_dir(),
-                            inode: metadata.ino(),
-                            device: metadata.dev(),
-                            file_count: if metadata.is_dir() { 0 } else { 1 },
-                            dir_count: if metadata.is_dir() { 1 } else { 0 },
-                        };
-
-                        files_scanned += 1;
-                        total_size += metadata.len();
-                        entries.push(file_entry);
-                    }
-                }
-                Err(_) => {
-                    continue;
-                }
+            if !report_progress(files_scanned, total_size, entry.path()) {
+                break;
             }
         }
 
-        println!(
-            "Scan completed: {} files, {} in {:.2}s",
-            files_scanned,
-            humansize::format_size(total_size, humansize::BINARY),
-            start_time.elapsed().as_secs_f32()
-        );
-
-        Self::build_tree(path, entries)
+        entries
     }
 
-    fn build_tree(path: &Path, entries: Vec<FileEntry>) -> Result<FileTree, ScanError> {
+    fn build_tree(path: &Path, entries: Vec<FileEntry>) -> FileTree {
         let mut tree = FileTree::new(path.to_path_buf());
         let mut path_to_node: HashMap<PathBuf, Arc<RwLock<TreeNode>>> = HashMap::new();
 
@@ -254,14 +203,14 @@ impl Scanner {
             Self::calculate_totals(&mut tree);
         }
 
-        Ok(tree)
+        tree
     }
 
     fn calculate_cumulative_sizes(node: &Arc<RwLock<TreeNode>>) -> u64 {
         let mut total_size = node.read().unwrap().entry.size;
 
         for child in &node.read().unwrap().children {
-            total_size += Self::calculate_cumulative_sizes(child);
+            total_size = total_size.saturating_add(Self::calculate_cumulative_sizes(child));
         }
 
         node.write().unwrap().entry.size = total_size;
@@ -279,13 +228,13 @@ impl Scanner {
 
     fn count_files_dirs(node: &Arc<RwLock<TreeNode>>) -> (u64, u64) {
         let node_guard = node.read().unwrap();
-        let mut files = if node_guard.entry.is_directory { 0 } else { 1 };
-        let mut dirs = if node_guard.entry.is_directory { 1 } else { 0 };
+        let mut files: u64 = if node_guard.entry.is_directory { 0 } else { 1 };
+        let mut dirs: u64 = if node_guard.entry.is_directory { 1 } else { 0 };
 
         for child in &node_guard.children {
             let (child_files, child_dirs) = Self::count_files_dirs(child);
-            files += child_files;
-            dirs += child_dirs;
+            files = files.saturating_add(child_files);
+            dirs = dirs.saturating_add(child_dirs);
         }
 
         (files, dirs)
@@ -296,6 +245,77 @@ impl Scanner {
 pub enum ScanError {
     #[error("Path not found: {0}")]
     PathNotFound(PathBuf),
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+    use std::os::unix::fs::MetadataExt;
+    use std::time::Duration;
+
+    use tempfile::tempdir;
+
+    use super::{ScanConfig, ScanUpdate, Scanner};
+
+    #[test]
+    fn reports_allocated_size_for_sparse_files() {
+        let directory = tempdir().unwrap();
+        let sparse_file = directory.path().join("sparse.img");
+        File::create(&sparse_file)
+            .unwrap()
+            .set_len(1024 * 1024 * 1024)
+            .unwrap();
+
+        let tree = Scanner::new(ScanConfig::default())
+            .scan(directory.path())
+            .unwrap();
+        let root = tree.root.read().unwrap();
+        let sparse_size = root
+            .children
+            .iter()
+            .find(|node| node.read().unwrap().entry.path == sparse_file)
+            .unwrap()
+            .read()
+            .unwrap()
+            .entry
+            .size;
+        let expected_size = std::fs::metadata(&sparse_file)
+            .unwrap()
+            .blocks()
+            .saturating_mul(512);
+
+        assert_eq!(sparse_size, expected_size);
+        assert!(sparse_size < 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn ignores_hidden_entries_by_default() {
+        let directory = tempdir().unwrap();
+        std::fs::write(directory.path().join("visible"), "visible").unwrap();
+        std::fs::write(directory.path().join(".hidden"), "hidden").unwrap();
+
+        let tree = Scanner::new(ScanConfig::default())
+            .scan(directory.path())
+            .unwrap();
+
+        assert_eq!(tree.total_files, 1);
+    }
+
+    #[test]
+    fn progress_scan_returns_the_completed_tree() {
+        let directory = tempdir().unwrap();
+        std::fs::write(directory.path().join("file"), "contents").unwrap();
+
+        let updates = Scanner::new(ScanConfig::default())
+            .scan_with_progress(directory.path())
+            .unwrap();
+        let completion = loop {
+            match updates.recv_timeout(Duration::from_secs(5)).unwrap() {
+                ScanUpdate::Progress(_) => continue,
+                ScanUpdate::Complete(tree) => break tree,
+            }
+        };
+
+        assert_eq!(completion.total_files, 1);
+    }
 }
