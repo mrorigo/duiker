@@ -1,14 +1,16 @@
 use std::collections::{HashMap, HashSet};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
 use crossbeam::channel::{unbounded, Receiver};
 use ignore::{WalkBuilder, WalkState};
 
 use crate::tree::{FileEntry, FileTree, TreeNode};
+
+type ProgressCallback = Arc<dyn Fn(u64, u64, &Path) -> bool + Send + Sync>;
 
 #[derive(Debug, Clone)]
 pub struct ScanConfig {
@@ -74,12 +76,14 @@ impl Scanner {
         std::thread::spawn(move || {
             let progress_tx_for_callback = progress_tx.clone();
             let progress_state = Mutex::new((Instant::now(), 0u64, 0u64));
-            let entries =
-                Self::collect_entries(&thread_path, &config, Arc::new(move |files_scanned, total_size, path: &Path| {
+            let entries = Self::collect_entries(
+                &thread_path,
+                &config,
+                Arc::new(move |files_scanned, total_size, path: &Path| {
                     let mut state = progress_state.lock().unwrap();
                     let now = Instant::now();
-                    let significant_change = files_scanned - state.1 > 1_000
-                        || total_size - state.2 > 100 * 1024 * 1024;
+                    let significant_change =
+                        files_scanned - state.1 > 1_000 || total_size - state.2 > 100 * 1024 * 1024;
 
                     if now.duration_since(state.0) >= std::time::Duration::from_millis(500)
                         || significant_change
@@ -98,7 +102,8 @@ impl Scanner {
                         state.2 = total_size;
                     }
                     true
-                }));
+                }),
+            );
 
             let tree = Self::build_tree(&thread_path, entries);
             let _ = progress_tx.send(ScanUpdate::Complete(tree));
@@ -119,9 +124,8 @@ impl Scanner {
     fn collect_entries(
         path: &Path,
         config: &ScanConfig,
-        report_progress: Arc<dyn Fn(u64, u64, &Path) -> bool + Send + Sync>,
-    ) -> Vec<FileEntry>
-    {
+        report_progress: ProgressCallback,
+    ) -> Vec<FileEntry> {
         let mut walker_builder = WalkBuilder::new(path);
         walker_builder
             .hidden(config.ignore_hidden)
@@ -146,21 +150,37 @@ impl Scanner {
             let cancelled = Arc::clone(&cancelled);
             let report_progress = Arc::clone(&report_progress);
             Box::new(move |result| {
-                if cancelled.load(Ordering::Relaxed) { return WalkState::Quit; }
-                let Ok(entry) = result else { return WalkState::Continue; };
-                let Ok(metadata) = entry.metadata() else { return WalkState::Continue; };
-                if !inode_cache.lock().unwrap().insert((metadata.dev(), metadata.ino())) {
+                if cancelled.load(Ordering::Relaxed) {
+                    return WalkState::Quit;
+                }
+                let Ok(entry) = result else {
+                    return WalkState::Continue;
+                };
+                let Ok(metadata) = entry.metadata() else {
+                    return WalkState::Continue;
+                };
+                if !inode_cache
+                    .lock()
+                    .unwrap()
+                    .insert((metadata.dev(), metadata.ino()))
+                {
                     return WalkState::Continue;
                 }
                 let is_directory = metadata.is_dir();
                 let size = metadata.blocks().saturating_mul(512);
                 entries.lock().unwrap().push(FileEntry {
-                    path: entry.path().to_path_buf(), size, is_directory,
-                    inode: metadata.ino(), device: metadata.dev(),
-                    file_count: u64::from(!is_directory), dir_count: u64::from(is_directory),
+                    path: entry.path().to_path_buf(),
+                    size,
+                    is_directory,
+                    inode: metadata.ino(),
+                    device: metadata.dev(),
+                    file_count: u64::from(!is_directory),
+                    dir_count: u64::from(is_directory),
                 });
                 let count = scanned.fetch_add(1, Ordering::Relaxed) + 1;
-                let bytes = total_size.fetch_add(size, Ordering::Relaxed).saturating_add(size);
+                let bytes = total_size
+                    .fetch_add(size, Ordering::Relaxed)
+                    .saturating_add(size);
                 if report_progress(count, bytes, entry.path()) {
                     WalkState::Continue
                 } else {
@@ -212,7 +232,10 @@ impl Scanner {
     fn into_shared(index: usize, nodes: &[(FileEntry, Vec<usize>)]) -> Arc<RwLock<TreeNode>> {
         let (entry, children) = &nodes[index];
         let mut node = TreeNode::new(entry.clone());
-        node.children = children.iter().map(|&child| Self::into_shared(child, nodes)).collect();
+        node.children = children
+            .iter()
+            .map(|&child| Self::into_shared(child, nodes))
+            .collect();
         Arc::new(RwLock::new(node))
     }
 

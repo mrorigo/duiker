@@ -20,7 +20,8 @@ A modern, high-performance disk usage analyzer for the terminal. `rdirstat` prov
 -   **Configurable Scanning:**
     -   Follow symbolic links (`--follow-links`).
     -   Include hidden files and directories when needed (`--hidden`).
-    -   Limit scan depth (`--depth`).
+    -   Limit reported tree depth (`--max-reporting-depth`, default 3).
+    -   Optionally limit filesystem traversal (`--scan-depth`); omitted by default.
     -   Adjust thread count (`--threads`).
     -   (Future: Custom ignore patterns via `.gitignore` or similar mechanism).
 -   **Human-Readable Output:** Sizes are displayed in intuitive units (KB, MB, GB, etc.).
@@ -68,6 +69,12 @@ To scan a specific path:
 rdirstat /path/to/directory
 ```
 
+Multiple files or directories can be scanned in one invocation:
+
+```bash
+rdirstat src tests README.md
+```
+
 ### Interactive TUI Mode
 
 Launch the full-featured interactive Text User Interface:
@@ -104,7 +111,7 @@ rdirstat interactive
 Customize your scan and output using various flags:
 
 ```bash
-rdirstat [OPTIONS] [PATH]
+rdirstat [OPTIONS] [PATH]...
 ```
 
 | Short | Long            | Description                                  | Default      |
@@ -112,11 +119,12 @@ rdirstat [OPTIONS] [PATH]
 | `-j`  | `--json`        | Output results in JSON format.               | `false`      |
 | `-L`  | `--follow-links`| Follow symbolic links.                       | `false`      |
 | `-H`  | `--hidden`      | Include hidden files and directories.        | `false`      |
-| `-d`  | `--depth <INT>` | Maximum depth for scanning.                  | `None` (full) |
+| `-d`  | `--max-reporting-depth <INT>` | Maximum depth shown in human-readable tree output. | `3` |
+|       | `--scan-depth <INT>` | Maximum filesystem traversal depth; truncated totals are incomplete. | Unlimited |
 | `-t`  | `--threads <INT>` | Number of threads to use for scanning.       | `num_cpus`   |
 |       | `--color <MODE>` | Colour output: `auto`, `always`, or `never`. | `auto`       |
 
-**Example: Scan with custom depth, including hidden files, then output JSON**
+**Example: Limit displayed depth, include hidden files, then output JSON**
 
 ```bash
 rdirstat -d 3 -H --json /home/user/myproject
@@ -172,7 +180,7 @@ Provides a human-readable, indented tree structure of your directories and files
 
 ### JSON Output (`--json` or `export --format json`)
 
-Outputs a JSON object containing the total size, file count, and directory count of the scanned path.
+Outputs a JSON object for one path, or an array of objects when multiple paths are scanned.
 *(Note: The current JSON formatter only outputs top-level summary. Full tree export is a planned feature.)*
 
 ```json

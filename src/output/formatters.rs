@@ -9,11 +9,12 @@ pub trait OutputFormatter {
 pub struct JsonFormatter;
 pub struct TreeFormatter {
     color: bool,
+    max_depth: Option<usize>,
 }
 
 impl TreeFormatter {
-    pub fn new(color: bool) -> Self {
-        Self { color }
+    pub fn new(color: bool, max_depth: Option<usize>) -> Self {
+        Self { color, max_depth }
     }
 }
 
@@ -36,6 +37,23 @@ impl OutputFormatter for JsonFormatter {
     }
 }
 
+impl JsonFormatter {
+    pub fn format_many(trees: &[FileTree]) -> String {
+        let outputs: Vec<_> = trees
+            .iter()
+            .map(|tree| {
+                serde_json::json!({
+                    "path": tree.root.read().unwrap().entry.path,
+                    "total_size": tree.total_size,
+                    "total_files": tree.total_files,
+                    "total_dirs": tree.total_dirs,
+                })
+            })
+            .collect();
+        serde_json::to_string_pretty(&outputs).unwrap_or_else(|_| "[]".to_string())
+    }
+}
+
 impl OutputFormatter for TreeFormatter {
     fn format(&self, tree: &FileTree) -> String {
         let mut output = String::new();
@@ -49,7 +67,23 @@ impl OutputFormatter for TreeFormatter {
         ));
         output.push_str("SIZE       %       NAME\n");
         drop(root);
-        self.format_node(&tree.root, 0, tree.total_size, &mut output);
+        let root = tree.root.read().unwrap();
+        let children = root.children.clone();
+        let root_size = root.entry.size;
+        drop(root);
+        if self.max_depth == Some(0) {
+            return output;
+        }
+        for (index, child) in children.iter().enumerate() {
+            self.format_node(
+                child,
+                1,
+                root_size,
+                &[],
+                index + 1 == children.len(),
+                &mut output,
+            );
+        }
         output
     }
 }
@@ -60,10 +94,11 @@ impl TreeFormatter {
         node: &Arc<std::sync::RwLock<TreeNode>>,
         depth: usize,
         parent_size: u64,
+        ancestors_last: &[bool],
+        is_last: bool,
         output: &mut String,
     ) {
         let node_guard = node.read().unwrap();
-        let indent = "  ".repeat(depth.saturating_sub(1));
         let size_str = humansize::format_size(node_guard.entry.size, humansize::BINARY);
         let percentage = node_guard
             .entry
@@ -93,13 +128,48 @@ impl TreeFormatter {
             } else {
                 name
             };
+            let tree_prefix = if depth == 1 {
+                String::new()
+            } else {
+                let mut prefix = String::new();
+                for ancestor_is_last in ancestors_last
+                    .iter()
+                    .take(ancestors_last.len().saturating_sub(1))
+                {
+                    prefix.push_str(if *ancestor_is_last { "    " } else { "|   " });
+                }
+                prefix.push_str(if is_last { "\\-- " } else { "|-- " });
+                prefix
+            };
             output.push_str(&format!(
-                "{indent}{size_str:>10} {percentage:>3}%  {styled_name}\n"
+                "{size_str:>10} {percentage:>3}%  {tree_prefix}{styled_name}\n"
             ));
         }
 
-        for child in &node_guard.children {
-            self.format_node(child, depth + 1, node_guard.entry.size, output);
+        let children = node_guard.children.clone();
+        let node_size = node_guard.entry.size;
+        let has_children = !children.is_empty();
+        drop(node_guard);
+        if self.max_depth.is_some_and(|max_depth| depth >= max_depth) {
+            if has_children {
+                let indent = "    ".repeat(depth);
+                output.push_str(&format!("{indent}… descendants omitted\n"));
+            }
+            return;
+        }
+        let mut child_ancestors = ancestors_last.to_vec();
+        if depth > 0 {
+            child_ancestors.push(is_last);
+        }
+        for (index, child) in children.iter().enumerate() {
+            self.format_node(
+                child,
+                depth + 1,
+                node_size,
+                &child_ancestors,
+                index + 1 == children.len(),
+                output,
+            );
         }
     }
 }

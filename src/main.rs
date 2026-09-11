@@ -9,7 +9,9 @@ use std::path::PathBuf;
 #[command(about = "A modern, high-performance disk usage analyzer")]
 #[command(version = "0.1.0")]
 struct Cli {
-    path: Option<PathBuf>,
+    /// One or more files or directories to scan.
+    #[arg(value_name = "PATH")]
+    paths: Vec<PathBuf>,
 
     #[arg(short, long)]
     json: bool,
@@ -21,8 +23,13 @@ struct Cli {
     #[arg(short = 'H', long = "hidden")]
     include_hidden: bool,
 
-    #[arg(short, long)]
-    depth: Option<usize>,
+    /// Limit filesystem traversal; truncated scans produce incomplete totals.
+    #[arg(long = "scan-depth", alias = "max-depth")]
+    scan_depth: Option<usize>,
+
+    /// Limit rendered tree depth without affecting directory summaries.
+    #[arg(short = 'd', long, default_value_t = 3)]
+    max_reporting_depth: usize,
 
     #[arg(short, long)]
     threads: Option<usize>,
@@ -79,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = ScanConfig {
         follow_links: cli.follow_links,
         ignore_hidden: !cli.include_hidden,
-        max_depth: cli.depth,
+        max_depth: cli.scan_depth,
         num_threads: cli.threads,
         ..Default::default()
     };
@@ -99,7 +106,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let formatter: Box<dyn OutputFormatter> = match format.as_str() {
                 "json" => Box::new(JsonFormatter),
-                "tree" => Box::new(TreeFormatter::new(false)),
+                "tree" => Box::new(TreeFormatter::new(false, Some(cli.max_reporting_depth))),
                 _ => {
                     eprintln!("Unknown format: {}", format);
                     std::process::exit(1);
@@ -111,19 +118,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         None => {
             let scanner = Scanner::new(config);
-            let tree = scanner.scan(
-                cli.path
-                    .as_deref()
-                    .unwrap_or_else(|| std::path::Path::new(".")),
-            )?;
+            let paths = if cli.paths.is_empty() {
+                vec![PathBuf::from(".")]
+            } else {
+                cli.paths
+            };
+            let trees = paths
+                .iter()
+                .map(|path| scanner.scan(path))
+                .collect::<Result<Vec<_>, _>>()?;
 
             if cli.json {
                 let formatter = JsonFormatter;
-                println!("{}", formatter.format(&tree));
+                let output = if trees.len() == 1 {
+                    formatter.format(&trees[0])
+                } else {
+                    JsonFormatter::format_many(&trees)
+                };
+                println!("{output}");
             } else {
-                tree.sort_by_size();
-                let formatter = TreeFormatter::new(cli.color.enabled());
-                println!("{}", formatter.format(&tree));
+                for tree in &trees {
+                    tree.sort_by_size();
+                }
+                let formatter = TreeFormatter::new(cli.color.enabled(), Some(cli.max_reporting_depth));
+                let output = trees
+                    .iter()
+                    .map(|tree| formatter.format(tree))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                println!("{output}");
             }
         }
     }
