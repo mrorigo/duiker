@@ -8,7 +8,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use tui::{backend::CrosstermBackend, Terminal};
+use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::scanner::{ScanConfig, ScanProgress, ScanUpdate, Scanner};
 use crate::tree::{FileTree, TreeNode};
@@ -359,10 +359,13 @@ pub fn run_app(path: PathBuf, config: ScanConfig) -> Result<(), Box<dyn std::err
     Ok(())
 }
 
-fn run_app_loop<B: tui::backend::Backend>(
+fn run_app_loop<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     mut app: App,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    <B as ratatui::backend::Backend>::Error: 'static,
+{
     let tick_rate = Duration::from_millis(100);
     let mut last_tick = Instant::now();
 
@@ -373,7 +376,7 @@ fn run_app_loop<B: tui::backend::Backend>(
         terminal.draw(|f| {
             if app.is_scanning {
                 if let Some(progress) = &app.scan_progress {
-                    render_scan_progress(f, progress, f.size());
+                    render_scan_progress(f, progress, f.area());
                 } else {
                     // Show initial scanning state
                     let progress = ScanProgress {
@@ -382,7 +385,7 @@ fn run_app_loop<B: tui::backend::Backend>(
                         current_path: Some(app.current_path.clone()),
                         elapsed: Duration::from_secs(0),
                     };
-                    render_scan_progress(f, &progress, f.size());
+                    render_scan_progress(f, &progress, f.area());
                 }
             } else {
                 ui(f, &mut app);
@@ -418,20 +421,20 @@ fn run_app_loop<B: tui::backend::Backend>(
     Ok(())
 }
 
-fn ui<B: tui::backend::Backend>(f: &mut tui::Frame<B>, app: &mut App) {
-    let chunks = tui::layout::Layout::default()
-        .direction(tui::layout::Direction::Vertical)
+fn ui(f: &mut ratatui::Frame, app: &mut App) {
+    let chunks = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
         .margin(1)
         .constraints(
             [
-                tui::layout::Constraint::Length(3), // Header
-                tui::layout::Constraint::Length(3), // Tabs
-                tui::layout::Constraint::Min(10),   // Main content
-                tui::layout::Constraint::Length(3), // Status bar
+                ratatui::layout::Constraint::Length(3), // Header
+                ratatui::layout::Constraint::Length(3), // Tabs
+                ratatui::layout::Constraint::Min(10),   // Main content
+                ratatui::layout::Constraint::Length(3), // Status bar
             ]
             .as_ref(),
         )
-        .split(f.size());
+        .split(f.area());
 
     render_header(f, app, chunks[0]);
     render_tabs(f, app, chunks[1]);

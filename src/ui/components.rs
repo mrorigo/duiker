@@ -1,8 +1,7 @@
-use tui::{
-    backend::Backend,
+use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::Spans,
+    text::Line,
     widgets::{Block, Borders, Paragraph, Row, Table, Tabs, Wrap},
     Frame,
 };
@@ -12,12 +11,12 @@ use crate::tree::TreeNode;
 use crate::ui::tui::{App, ViewMode};
 use std::sync::{Arc, RwLock};
 
-pub fn render_header<B: Backend>(f: &mut Frame<B>, app: &App, area: Rect) {
+pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
     let current_path = app.current_path.to_string_lossy();
     let title = if app.is_scanning {
-        format!("dirstat - Scanning [{}]", current_path)
+        format!("duiker - Scanning [{}]", current_path)
     } else {
-        format!("dirstat · {}", current_path)
+        format!("duiker · {}", current_path)
     };
 
     let header = Paragraph::new(title)
@@ -30,12 +29,12 @@ pub fn render_header<B: Backend>(f: &mut Frame<B>, app: &App, area: Rect) {
     f.render_widget(header, area);
 }
 
-pub fn render_tabs<B: Backend>(f: &mut Frame<B>, app: &App, area: Rect) {
+pub fn render_tabs(f: &mut Frame, app: &App, area: Rect) {
     let titles = vec![
-        Spans::from("Tree View (1)"),
-        Spans::from("Chart View (2)"),
-        Spans::from("Details (3)"),
-        Spans::from("Treemap (4)"),
+        Line::from("Tree View (1)"),
+        Line::from("Chart View (2)"),
+        Line::from("Details (3)"),
+        Line::from("Treemap (4)"),
     ];
     let tabs = Tabs::new(titles)
         .select(app.view_mode as usize)
@@ -50,7 +49,7 @@ pub fn render_tabs<B: Backend>(f: &mut Frame<B>, app: &App, area: Rect) {
     f.render_widget(tabs, area);
 }
 
-pub fn render_status_bar<B: Backend>(f: &mut Frame<B>, app: &App, area: Rect) {
+pub fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let selected_info = if let Some(selected_node) = app.get_selected_node() {
         let node_guard = selected_node.read().unwrap();
         format!(
@@ -92,7 +91,7 @@ pub fn render_status_bar<B: Backend>(f: &mut Frame<B>, app: &App, area: Rect) {
     f.render_widget(status_bar, area);
 }
 
-pub fn render_main_content<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
+pub fn render_main_content(f: &mut Frame, app: &mut App, area: Rect) {
     if app.tree.is_none() && !app.is_scanning {
         render_no_data(f, app.error_message.as_deref(), area);
         return;
@@ -106,7 +105,7 @@ pub fn render_main_content<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Re
     }
 }
 
-fn render_no_data<B: Backend>(f: &mut Frame<B>, error_message: Option<&str>, area: Rect) {
+fn render_no_data(f: &mut Frame, error_message: Option<&str>, area: Rect) {
     let (title, message) = match error_message {
         Some(message) => ("Scan Error", message),
         None => ("No Data", "No scan data available. Run a scan first."),
@@ -120,7 +119,7 @@ fn render_no_data<B: Backend>(f: &mut Frame<B>, error_message: Option<&str>, are
     f.render_widget(paragraph, area);
 }
 
-fn render_tree_view<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
+fn render_tree_view(f: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(70), Constraint::Percentage(30)].as_ref())
@@ -130,7 +129,7 @@ fn render_tree_view<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
     render_selected_details(f, app, chunks[1]);
 }
 
-fn render_selected_details<B: Backend>(f: &mut Frame<B>, app: &App, area: Rect) {
+fn render_selected_details(f: &mut Frame, app: &App, area: Rect) {
     let content = if let Some(selected) = app.get_selected_node() {
         let node = selected.read().unwrap();
         let parent_size = app
@@ -178,27 +177,29 @@ fn render_selected_details<B: Backend>(f: &mut Frame<B>, app: &App, area: Rect) 
     f.render_widget(panel, area);
 }
 
-fn render_file_tree<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
+fn render_file_tree(f: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default().title("File Tree").borders(Borders::ALL);
 
     let children = app.get_current_children();
     let (header, rows) = build_tree_table(&children, app.selected_index);
 
-    let table = Table::new(rows)
-        .header(
-            header.style(
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        )
-        .block(block)
-        .widths(&[
+    let table = Table::new(
+        rows,
+        [
             Constraint::Length(3),  // Selection indicator
             Constraint::Length(2),  // Icon
             Constraint::Min(30),    // Name (flexible)
             Constraint::Length(12), // Size (fixed)
-        ]);
+        ],
+    )
+    .header(
+        header.style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+    )
+    .block(block);
 
     f.render_widget(table, area);
 }
@@ -255,28 +256,30 @@ fn build_tree_table(
     (header, rows)
 }
 
-fn render_details_view<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
+fn render_details_view(f: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default().title("File Details").borders(Borders::ALL);
 
     let children = app.get_current_children();
     let (header, rows) = build_file_table(&children, app.selected_index);
 
-    let table = Table::new(rows)
-        .header(
-            header.style(
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        )
-        .block(block)
-        .widths(&[
+    let table = Table::new(
+        rows,
+        [
             Constraint::Length(3),  // Selection indicator
             Constraint::Length(2),  // Icon
             Constraint::Min(30),    // Name
             Constraint::Length(12), // Size
             Constraint::Length(8),  // Type
-        ]);
+        ],
+    )
+    .header(
+        header.style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+    )
+    .block(block);
 
     f.render_widget(table, area);
 }
@@ -332,7 +335,7 @@ fn build_file_table(
     (header, rows)
 }
 
-fn render_chart_view<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
+fn render_chart_view(f: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
@@ -342,7 +345,7 @@ fn render_chart_view<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
     render_usage_summary(f, app, chunks[1]);
 }
 
-fn render_size_breakdown<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
+fn render_size_breakdown(f: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .title("Size Breakdown")
         .borders(Borders::ALL);
@@ -428,7 +431,7 @@ fn collect_entries_recursive(node: &Arc<RwLock<TreeNode>>, entries: &mut Vec<(St
     }
 }
 
-fn render_usage_summary<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
+fn render_usage_summary(f: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .title("Usage Summary")
         .borders(Borders::ALL);
@@ -469,7 +472,7 @@ fn find_largest_item(node: &Arc<RwLock<TreeNode>>) -> String {
     }
 }
 
-fn render_treemap_view<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
+fn render_treemap_view(f: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .title("Size Visualization")
         .borders(Borders::ALL);
@@ -532,7 +535,7 @@ fn build_treemap_visualization(node: &Arc<RwLock<TreeNode>>) -> String {
     visualization
 }
 
-pub fn render_scan_progress<B: Backend>(f: &mut Frame<B>, progress: &ScanProgress, area: Rect) {
+pub fn render_scan_progress(f: &mut Frame, progress: &ScanProgress, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(
