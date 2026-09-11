@@ -140,7 +140,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 for tree in &trees {
                     tree.sort_by_size();
                 }
-                let formatter = TreeFormatter::new(cli.color.enabled(), Some(cli.max_reporting_depth));
+                let formatter =
+                    TreeFormatter::new(cli.color.enabled(), Some(cli.max_reporting_depth));
                 let output = trees
                     .iter()
                     .map(|tree| formatter.format(tree))
