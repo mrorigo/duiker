@@ -1,8 +1,8 @@
 # duiker
 
 [![crates.io](https://img.shields.io/crates/v/duiker.svg)](https://crates.io/crates/duiker)
-[![Build Status](https://github.com/mrorigo/duiker/workflows/Rust/badge.svg)](https://github.com/your-username/duiker/actions)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Build Status](https://github.com/mrorigo/duiker/workflows/Rust/badge.svg)](https://github.com/mrorigo/duiker/actions)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE-MIT)
 [![Minimum Rust Version](https://img.shields.io/badge/rustc-1.70+-lightgray.svg)](https://blog.rust-lang.org/2023/05/18/Rust-1.70.0.html)
 [![Documentation](https://docs.rs/duiker/badge.svg)](https://docs.rs/duiker)
 
@@ -232,7 +232,7 @@ Please ensure your code adheres to Rust's best practices and includes tests wher
 
 ## 📝 License
 
-`duiker` is distributed under the MIT License. See `LICENSE` for more information.
+`duiker` is distributed under the [MIT License](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
 
 ---
 
