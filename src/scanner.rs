@@ -1,11 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 use crossbeam::channel::{unbounded, Receiver};
-use ignore::WalkBuilder;
+use ignore::{WalkBuilder, WalkState};
 
 use crate::tree::{FileEntry, FileTree, TreeNode};
 
@@ -71,16 +72,16 @@ impl Scanner {
 
         // Start the scan in a separate thread
         std::thread::spawn(move || {
-            let mut last_update_time = Instant::now();
-            let mut last_files_scanned = 0;
-            let mut last_total_size = 0;
+            let progress_tx_for_callback = progress_tx.clone();
+            let progress_state = Mutex::new((Instant::now(), 0u64, 0u64));
             let entries =
-                Self::collect_entries(&thread_path, &config, |files_scanned, total_size, path| {
+                Self::collect_entries(&thread_path, &config, Arc::new(move |files_scanned, total_size, path: &Path| {
+                    let mut state = progress_state.lock().unwrap();
                     let now = Instant::now();
-                    let significant_change = files_scanned - last_files_scanned > 1_000
-                        || total_size - last_total_size > 100 * 1024 * 1024;
+                    let significant_change = files_scanned - state.1 > 1_000
+                        || total_size - state.2 > 100 * 1024 * 1024;
 
-                    if now.duration_since(last_update_time) >= std::time::Duration::from_millis(500)
+                    if now.duration_since(state.0) >= std::time::Duration::from_millis(500)
                         || significant_change
                     {
                         let update = ScanUpdate::Progress(ScanProgress {
@@ -89,15 +90,15 @@ impl Scanner {
                             current_path: Some(path.to_path_buf()),
                             elapsed: start_time.elapsed(),
                         });
-                        if progress_tx.send(update).is_err() {
+                        if progress_tx_for_callback.send(update).is_err() {
                             return false;
                         }
-                        last_update_time = now;
-                        last_files_scanned = files_scanned;
-                        last_total_size = total_size;
+                        state.0 = now;
+                        state.1 = files_scanned;
+                        state.2 = total_size;
                     }
                     true
-                });
+                }));
 
             let tree = Self::build_tree(&thread_path, entries);
             let _ = progress_tx.send(ScanUpdate::Complete(tree));
@@ -111,17 +112,15 @@ impl Scanner {
             return Err(ScanError::PathNotFound(path.to_path_buf()));
         }
 
-        let entries = Self::collect_entries(path, &self.config, |_, _, _| true);
+        let entries = Self::collect_entries(path, &self.config, Arc::new(|_, _, _: &Path| true));
         Ok(Self::build_tree(path, entries))
     }
 
-    fn collect_entries<F>(
+    fn collect_entries(
         path: &Path,
         config: &ScanConfig,
-        mut report_progress: F,
+        report_progress: Arc<dyn Fn(u64, u64, &Path) -> bool + Send + Sync>,
     ) -> Vec<FileEntry>
-    where
-        F: FnMut(u64, u64, &Path) -> bool,
     {
         let mut walker_builder = WalkBuilder::new(path);
         walker_builder
@@ -134,76 +133,87 @@ impl Scanner {
             walker_builder.add_custom_ignore_filename(pattern);
         }
 
-        let mut entries = Vec::new();
-        let mut inode_cache = HashMap::new();
-        let mut files_scanned = 0;
-        let mut total_size: u64 = 0;
-
-        for entry in walker_builder.build().flatten() {
-            let Ok(metadata) = entry.metadata() else {
-                continue;
-            };
-            let inode_key = (metadata.dev(), metadata.ino());
-            if inode_cache.contains_key(&inode_key) {
-                continue;
-            }
-            inode_cache.insert(inode_key, ());
-
-            // `len` is the logical length. For disk usage, use allocated blocks;
-            // this avoids reporting sparse files as consuming their full virtual size.
-            let size = metadata.blocks().saturating_mul(512);
-            entries.push(FileEntry {
-                path: entry.path().to_path_buf(),
-                size,
-                is_directory: metadata.is_dir(),
-                inode: metadata.ino(),
-                device: metadata.dev(),
-                file_count: u64::from(!metadata.is_dir()),
-                dir_count: u64::from(metadata.is_dir()),
-            });
-            files_scanned += 1;
-            total_size = total_size.saturating_add(size);
-
-            if !report_progress(files_scanned, total_size, entry.path()) {
-                break;
-            }
-        }
-
-        entries
+        let entries = Arc::new(Mutex::new(Vec::new()));
+        let inode_cache = Arc::new(Mutex::new(HashSet::new()));
+        let scanned = Arc::new(AtomicU64::new(0));
+        let total_size = Arc::new(AtomicU64::new(0));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        walker_builder.build_parallel().run(|| {
+            let entries = Arc::clone(&entries);
+            let inode_cache = Arc::clone(&inode_cache);
+            let scanned = Arc::clone(&scanned);
+            let total_size = Arc::clone(&total_size);
+            let cancelled = Arc::clone(&cancelled);
+            let report_progress = Arc::clone(&report_progress);
+            Box::new(move |result| {
+                if cancelled.load(Ordering::Relaxed) { return WalkState::Quit; }
+                let Ok(entry) = result else { return WalkState::Continue; };
+                let Ok(metadata) = entry.metadata() else { return WalkState::Continue; };
+                if !inode_cache.lock().unwrap().insert((metadata.dev(), metadata.ino())) {
+                    return WalkState::Continue;
+                }
+                let is_directory = metadata.is_dir();
+                let size = metadata.blocks().saturating_mul(512);
+                entries.lock().unwrap().push(FileEntry {
+                    path: entry.path().to_path_buf(), size, is_directory,
+                    inode: metadata.ino(), device: metadata.dev(),
+                    file_count: u64::from(!is_directory), dir_count: u64::from(is_directory),
+                });
+                let count = scanned.fetch_add(1, Ordering::Relaxed) + 1;
+                let bytes = total_size.fetch_add(size, Ordering::Relaxed).saturating_add(size);
+                if report_progress(count, bytes, entry.path()) {
+                    WalkState::Continue
+                } else {
+                    cancelled.store(true, Ordering::Relaxed);
+                    WalkState::Quit
+                }
+            })
+        });
+        Arc::try_unwrap(entries).unwrap().into_inner().unwrap()
     }
 
     fn build_tree(path: &Path, entries: Vec<FileEntry>) -> FileTree {
         let mut tree = FileTree::new(path.to_path_buf());
-        let mut path_to_node: HashMap<PathBuf, Arc<RwLock<TreeNode>>> = HashMap::new();
+        let mut path_to_node: HashMap<PathBuf, usize> = HashMap::new();
+        let mut nodes: Vec<(FileEntry, Vec<usize>)> = Vec::with_capacity(entries.len() + 1);
 
         for entry in &entries {
-            let node = Arc::new(RwLock::new(TreeNode::new(entry.clone())));
-            path_to_node.insert(entry.path.clone(), node);
+            let index = nodes.len();
+            nodes.push((entry.clone(), Vec::new()));
+            path_to_node.insert(entry.path.clone(), index);
         }
 
         if !path_to_node.contains_key(path) {
             let root_entry = FileEntry::new(path.to_path_buf(), 0, true);
-            let root_node = Arc::new(RwLock::new(TreeNode::new(root_entry)));
-            path_to_node.insert(path.to_path_buf(), root_node);
+            let index = nodes.len();
+            nodes.push((root_entry, Vec::new()));
+            path_to_node.insert(path.to_path_buf(), index);
         }
 
         for entry in &entries {
-            if let Some(node) = path_to_node.get(&entry.path) {
+            if let Some(&node) = path_to_node.get(&entry.path) {
                 if let Some(parent_path) = entry.path.parent() {
-                    if let Some(parent_node) = path_to_node.get(parent_path) {
-                        parent_node.write().unwrap().add_child(node.clone());
+                    if let Some(&parent_node) = path_to_node.get(parent_path) {
+                        nodes[parent_node].1.push(node);
                     }
                 }
             }
         }
 
-        if let Some(root_node) = path_to_node.get(path) {
-            tree.root = root_node.clone();
+        if let Some(&root_index) = path_to_node.get(path) {
+            tree.root = Self::into_shared(root_index, &nodes);
             Self::calculate_cumulative_sizes(&tree.root);
             Self::calculate_totals(&mut tree);
         }
 
         tree
+    }
+
+    fn into_shared(index: usize, nodes: &[(FileEntry, Vec<usize>)]) -> Arc<RwLock<TreeNode>> {
+        let (entry, children) = &nodes[index];
+        let mut node = TreeNode::new(entry.clone());
+        node.children = children.iter().map(|&child| Self::into_shared(child, nodes)).collect();
+        Arc::new(RwLock::new(node))
     }
 
     fn calculate_cumulative_sizes(node: &Arc<RwLock<TreeNode>>) -> u64 {
