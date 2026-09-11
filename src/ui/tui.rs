@@ -40,6 +40,9 @@ pub struct App {
     pub progress_receiver: Option<crossbeam::channel::Receiver<ScanUpdate>>,
     // Store the scan config for consistent behavior
     pub scan_config: ScanConfig,
+    pub filter_query: String,
+    pub filter_mode: bool,
+    pub sort_by_name: bool,
 }
 
 impl App {
@@ -57,6 +60,9 @@ impl App {
             node_stack: Vec::new(),
             progress_receiver: None,
             scan_config: config,
+            filter_query: String::new(),
+            filter_mode: false,
+            sort_by_name: false,
         }
     }
 
@@ -114,6 +120,24 @@ impl App {
             return;
         }
 
+        if self.filter_mode {
+            match key {
+                KeyCode::Esc | KeyCode::Enter => self.filter_mode = false,
+                KeyCode::Backspace => {
+                    self.filter_query.pop();
+                    self.selected_index = 0;
+                    self.scroll_offset = 0;
+                }
+                KeyCode::Char(character) => {
+                    self.filter_query.push(character);
+                    self.selected_index = 0;
+                    self.scroll_offset = 0;
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match key {
             KeyCode::Char('1') => {
                 self.view_mode = ViewMode::Tree;
@@ -141,6 +165,16 @@ impl App {
             KeyCode::PageUp => self.page_up(),
             KeyCode::Enter => self.enter_selected(),
             KeyCode::Backspace => self.go_up(),
+            KeyCode::Char('/') => {
+                self.filter_mode = true;
+                self.selected_index = 0;
+                self.scroll_offset = 0;
+            }
+            KeyCode::Char('s') => {
+                self.sort_by_name = !self.sort_by_name;
+                self.selected_index = 0;
+                self.scroll_offset = 0;
+            }
             _ => {}
         }
     }
@@ -249,7 +283,7 @@ impl App {
     }
 
     pub fn get_current_children(&self) -> Vec<Arc<RwLock<TreeNode>>> {
-        if let Some(ref current_node) = self.current_node {
+        let mut children = if let Some(ref current_node) = self.current_node {
             let node_guard = current_node.read().unwrap();
             node_guard.children.clone()
         } else if let Some(ref tree) = self.tree {
@@ -257,7 +291,37 @@ impl App {
             root_guard.children.clone()
         } else {
             Vec::new()
+        };
+
+        if !self.filter_query.is_empty() {
+            let query = self.filter_query.to_lowercase();
+            children.retain(|child| {
+                child
+                    .read()
+                    .unwrap()
+                    .entry
+                    .path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_lowercase().contains(&query))
+                    .unwrap_or(false)
+            });
         }
+
+        if self.sort_by_name {
+            children.sort_by_cached_key(|child| {
+                child
+                    .read()
+                    .unwrap()
+                    .entry
+                    .path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_lowercase())
+                    .unwrap_or_default()
+            });
+        } else {
+            children.sort_by_key(|child| std::cmp::Reverse(child.read().unwrap().entry.size));
+        }
+        children
     }
 
     pub fn get_selected_node(&self) -> Option<Arc<RwLock<TreeNode>>> {

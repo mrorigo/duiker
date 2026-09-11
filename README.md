@@ -91,6 +91,9 @@ rdirstat interactive
 | `Page Up`, `Page Down` | Scroll pages in lists.                 |
 | `Enter`   | Enter a selected directory.              |
 | `Backspace` | Go up to the parent directory.           |
+| `/`       | Filter the current directory by name.    |
+| `s`       | Toggle sorting by size and name.         |
+| `Esc`     | Leave filter input mode.                 |
 | `q`       | Quit the application.                    |
 | `?`       | Show help (prints to console).           |
 
@@ -111,6 +114,7 @@ rdirstat [OPTIONS] [PATH]
 | `-H`  | `--hidden`      | Include hidden files and directories.        | `false`      |
 | `-d`  | `--depth <INT>` | Maximum depth for scanning.                  | `None` (full) |
 | `-t`  | `--threads <INT>` | Number of threads to use for scanning.       | `num_cpus`   |
+|       | `--color <MODE>` | Colour output: `auto`, `always`, or `never`. | `auto`       |
 
 **Example: Scan with custom depth, including hidden files, then output JSON**
 

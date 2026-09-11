@@ -1,6 +1,7 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use rdirstat::output::formatters::{JsonFormatter, OutputFormatter, TreeFormatter};
 use rdirstat::scanner::{ScanConfig, Scanner};
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -26,8 +27,30 @@ struct Cli {
     #[arg(short, long)]
     threads: Option<usize>,
 
+    /// Colourize human-readable output.
+    #[arg(long, value_enum, default_value_t = ColorMode::Auto)]
+    color: ColorMode,
+
     #[command(subcommand)]
     command: Option<Commands>,
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum ColorMode {
+    #[default]
+    Auto,
+    Always,
+    Never,
+}
+
+impl ColorMode {
+    fn enabled(self) -> bool {
+        match self {
+            Self::Always => true,
+            Self::Never => false,
+            Self::Auto => std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none(),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -72,10 +95,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }) => {
             let scanner = Scanner::new(config);
             let tree = scanner.scan(&path)?;
+            tree.sort_by_size();
 
             let formatter: Box<dyn OutputFormatter> = match format.as_str() {
                 "json" => Box::new(JsonFormatter),
-                "tree" => Box::new(TreeFormatter),
+                "tree" => Box::new(TreeFormatter::new(false)),
                 _ => {
                     eprintln!("Unknown format: {}", format);
                     std::process::exit(1);
@@ -97,7 +121,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let formatter = JsonFormatter;
                 println!("{}", formatter.format(&tree));
             } else {
-                let formatter = TreeFormatter;
+                tree.sort_by_size();
+                let formatter = TreeFormatter::new(cli.color.enabled());
                 println!("{}", formatter.format(&tree));
             }
         }

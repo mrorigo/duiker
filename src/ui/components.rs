@@ -17,7 +17,7 @@ pub fn render_header<B: Backend>(f: &mut Frame<B>, app: &App, area: Rect) {
     let title = if app.is_scanning {
         format!("dirstat - Scanning [{}]", current_path)
     } else {
-        format!("dirstat - Modern Disk Usage Analyzer [{}]", current_path)
+        format!("dirstat · {}", current_path)
     };
 
     let header = Paragraph::new(title)
@@ -67,18 +67,23 @@ pub fn render_status_bar<B: Backend>(f: &mut Frame<B>, app: &App, area: Rect) {
         String::new()
     };
 
-    let status = if app.is_scanning {
+    let status = if app.filter_mode {
+        format!(
+            "Filter: {}_ | Esc finish · Backspace erase · q quit",
+            app.filter_query
+        )
+    } else if app.is_scanning {
         "Scanning... (Press 'q' to quit)".to_string()
     } else if let Some(tree) = &app.tree {
         format!(
-            "Total: {} in {} files, {} dirs{} | ↑↓:Navigate Enter:Open Backspace:Up q:Quit",
+            "Total: {} · {} files · {} dirs{} | ↑↓ navigate · Enter open · Backspace up · / filter · s sort · q quit",
             humansize::format_size(tree.total_size, humansize::BINARY),
             tree.total_files,
             tree.total_dirs,
             selected_info
         )
     } else {
-        "No data | ↑↓:Navigate Enter:Open Backspace:Up q:Quit".to_string()
+        "No data | ↑↓ navigate · Enter open · / filter · s sort · q quit".to_string()
     };
 
     let status_bar = Paragraph::new(status)
@@ -122,7 +127,55 @@ fn render_tree_view<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
         .split(area);
 
     render_file_tree(f, app, chunks[0]);
-    render_size_distribution(f, app, chunks[1]);
+    render_selected_details(f, app, chunks[1]);
+}
+
+fn render_selected_details<B: Backend>(f: &mut Frame<B>, app: &App, area: Rect) {
+    let content = if let Some(selected) = app.get_selected_node() {
+        let node = selected.read().unwrap();
+        let parent_size = app
+            .current_node
+            .as_ref()
+            .and_then(|parent| parent.read().ok().map(|parent| parent.entry.size))
+            .unwrap_or(node.entry.size);
+        let percentage = node
+            .entry
+            .size
+            .saturating_mul(100)
+            .checked_div(parent_size)
+            .unwrap_or(0);
+        let kind = if node.entry.is_directory {
+            "Directory"
+        } else {
+            "File"
+        };
+        format!(
+            "Name\n{}\n\nPath\n{}\n\nType\n{}\n\nAllocated\n{}\n\nShare\n{}%\n\nChildren\n{}",
+            node.entry
+                .path
+                .file_name()
+                .unwrap_or(node.entry.path.as_os_str())
+                .to_string_lossy(),
+            node.entry.path.display(),
+            kind,
+            humansize::format_size(node.entry.size, humansize::BINARY),
+            percentage,
+            node.children.len(),
+        )
+    } else {
+        "No selection".to_string()
+    };
+    let title = if app.filter_mode {
+        format!("Details · filter: {}", app.filter_query)
+    } else if app.sort_by_name {
+        "Details · sorted by name".to_string()
+    } else {
+        "Details · sorted by size".to_string()
+    };
+    let panel = Paragraph::new(content)
+        .block(Block::default().title(title).borders(Borders::ALL))
+        .wrap(Wrap { trim: true });
+    f.render_widget(panel, area);
 }
 
 fn render_file_tree<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
@@ -200,58 +253,6 @@ fn build_tree_table(
         .collect();
 
     (header, rows)
-}
-
-fn render_size_distribution<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
-    let block = Block::default()
-        .title("Largest Items in Current Directory")
-        .borders(Borders::ALL);
-
-    let children = app.get_current_children();
-    let content = build_top_items_list(&children);
-
-    let list = Paragraph::new(content)
-        .block(block)
-        .wrap(Wrap { trim: true });
-
-    f.render_widget(list, area);
-}
-
-fn build_top_items_list(children: &[Arc<RwLock<TreeNode>>]) -> Vec<Spans<'_>> {
-    let mut entries: Vec<(String, u64, bool)> = children
-        .iter()
-        .map(|child| {
-            let child_guard = child.read().unwrap();
-            let name = child_guard
-                .entry
-                .path
-                .file_name()
-                .unwrap_or(child_guard.entry.path.as_os_str())
-                .to_string_lossy()
-                .to_string();
-            (name, child_guard.entry.size, child_guard.entry.is_directory)
-        })
-        .collect();
-
-    // Sort by size and take top 10
-    entries.sort_by_key(|entry| std::cmp::Reverse(entry.1));
-    entries.truncate(10);
-
-    let mut items = Vec::new();
-    for (name, size, is_dir) in entries {
-        let size_str = humansize::format_size(size, humansize::BINARY);
-        let icon = if is_dir { "📁 " } else { "📄 " };
-
-        // Create aligned display with fixed width for size
-        let display_text = format!("{} {:40} {:>12}", icon, name, size_str);
-        items.push(Spans::from(display_text));
-    }
-
-    if items.is_empty() {
-        items.push(Spans::from("No items found"));
-    }
-
-    items
 }
 
 fn render_details_view<B: Backend>(f: &mut Frame<B>, app: &mut App, area: Rect) {
