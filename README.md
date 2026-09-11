@@ -1,7 +1,7 @@
 # duiker
 
 [![crates.io](https://img.shields.io/crates/v/duiker.svg)](https://crates.io/crates/duiker)
-[![Build Status](https://github.com/mrorigo/duiker/workflows/Rust/badge.svg)](https://github.com/mrorigo/duiker/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/mrorigo/duiker/ci.yml.svg?branch=main)](https://github.com/mrorigo/duiker/actions)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE-MIT)
 [![Minimum Rust Version](https://img.shields.io/badge/rustc-1.70+-lightgray.svg)](https://blog.rust-lang.org/2023/05/18/Rust-1.70.0.html)
 [![Documentation](https://docs.rs/duiker/badge.svg)](https://docs.rs/duiker)
