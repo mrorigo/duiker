@@ -1,12 +1,24 @@
-# rdirstat
+# duiker
 
-[![crates.io](https://img.shields.io/crates/v/rdirstat.svg)](https://crates.io/crates/rdirstat)
-[![Build Status](https://github.com/mrorigo/rdirstat/workflows/Rust/badge.svg)](https://github.com/your-username/rdirstat/actions)
+[![crates.io](https://img.shields.io/crates/v/duiker.svg)](https://crates.io/crates/duiker)
+[![Build Status](https://github.com/mrorigo/duiker/workflows/Rust/badge.svg)](https://github.com/your-username/duiker/actions)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Minimum Rust Version](https://img.shields.io/badge/rustc-1.70+-lightgray.svg)](https://blog.rust-lang.org/2023/05/18/Rust-1.70.0.html)
-[![Documentation](https://docs.rs/rdirstat/badge.svg)](https://docs.rs/rdirstat)
+[![Documentation](https://docs.rs/duiker/badge.svg)](https://docs.rs/duiker)
 
-A modern, high-performance disk usage analyzer for the terminal. `rdirstat` provides fast, detailed, and interactive insights into your file system, helping you quickly identify large files and directories.
+<p align="center">
+  <img src="docs/logo.png" alt="duiker logo" width="160">
+</p>
+
+A modern, high-performance disk usage analyzer for the terminal. `duiker` provides fast, detailed, and interactive insights into your file system, helping you quickly identify large files and directories.
+
+## 🦌 Why "duiker"?
+
+*Duiker* (rhymes with *hiker*) is Afrikaans for **"diver"**. Meet the blue duiker: one of the world's smallest antelopes, barely 35 cm tall. When something big crashes through the undergrowth, it doesn't bolt across open ground — it dives headfirst into the thickest bush, small enough to slip through where the heavy herbivores can't follow, and noses out the fallen fruit the others left behind.
+
+This tool does the same to your filesystem. `duiker` dives headfirst into your directory tree — every subfolder, every hidden file — and comes back with the exact spots where your disk is quietly disappearing. Small enough to live in your terminal. Fast enough that you won't wait for the answer.
+
+(The double pun is the point: it's a disk-usage tool that starts with `du`, and "diver" turns out to be the perfect metaphor for a recursive scanner.)
 
 ## ✨ Features
 
@@ -37,20 +49,20 @@ This result is a real-world observation, not a benchmark guarantee. Scan time de
 
 ## 🚀 Installation
 
-`rdirstat` can be installed via `cargo`, the Rust package manager.
+`duiker` can be installed via `cargo`, the Rust package manager.
 
 ### From Crates.io (Recommended)
 
 ```bash
-cargo install rdirstat
+cargo install duiker
 ```
 
 ### From Source
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/your-username/rdirstat.git
-    cd rdirstat
+    git clone https://github.com/your-username/duiker.git
+    cd duiker
     ```
 2.  **Build and install:**
     ```bash
@@ -61,26 +73,26 @@ Ensure you have Rust and Cargo installed. If not, follow the instructions on [ru
 
 ## 📖 Usage
 
-`rdirstat` offers both a command-line interface (CLI) for quick output and an interactive TUI for in-depth exploration.
+`duiker` offers both a command-line interface (CLI) for quick output and an interactive TUI for in-depth exploration.
 
 ### Basic CLI Scan
 
-By default, `rdirstat` will scan the current directory and print a tree-like output to the console.
+By default, `duiker` will scan the current directory and print a tree-like output to the console.
 
 ```bash
-rdirstat
+duiker
 ```
 
 To scan a specific path:
 
 ```bash
-rdirstat /path/to/directory
+duiker /path/to/directory
 ```
 
 Multiple files or directories can be scanned in one invocation:
 
 ```bash
-rdirstat src tests README.md
+duiker src tests README.md
 ```
 
 ### Interactive TUI Mode
@@ -88,13 +100,13 @@ rdirstat src tests README.md
 Launch the full-featured interactive Text User Interface:
 
 ```bash
-rdirstat interactive /path/to/directory
+duiker interactive /path/to/directory
 ```
 
 Or, to scan the current directory in interactive mode:
 
 ```bash
-rdirstat interactive
+duiker interactive
 ```
 
 **TUI Controls:**
@@ -119,7 +131,7 @@ rdirstat interactive
 Customize your scan and output using various flags:
 
 ```bash
-rdirstat [OPTIONS] [PATH]...
+duiker [OPTIONS] [PATH]...
 ```
 
 | Short | Long            | Description                                  | Default      |
@@ -135,7 +147,7 @@ rdirstat [OPTIONS] [PATH]...
 **Example: Limit displayed depth, include hidden files, then output JSON**
 
 ```bash
-rdirstat -d 3 -H --json /home/user/myproject
+duiker -d 3 -H --json /home/user/myproject
 ```
 
 ### Exporting Results
@@ -143,7 +155,7 @@ rdirstat -d 3 -H --json /home/user/myproject
 Use the `export` subcommand to save scan results to a file in a specified format.
 
 ```bash
-rdirstat export --format <FORMAT> --output <FILE_PATH> [PATH]
+duiker export --format <FORMAT> --output <FILE_PATH> [PATH]
 ```
 
 | Argument       | Description                         |
@@ -155,13 +167,13 @@ rdirstat export --format <FORMAT> --output <FILE_PATH> [PATH]
 **Example: Export tree view of `/var/log` to a file**
 
 ```bash
-rdirstat export --format tree --output var_log_tree.txt /var/log
+duiker export --format tree --output var_log_tree.txt /var/log
 ```
 
 **Example: Export JSON summary of `/srv/data`**
 
 ```bash
-rdirstat export --format json --output srv_data_summary.json /srv/data
+duiker export --format json --output srv_data_summary.json /srv/data
 ```
 
 ## 📊 Output Formats
@@ -220,7 +232,7 @@ Please ensure your code adheres to Rust's best practices and includes tests wher
 
 ## 📝 License
 
-`rdirstat` is distributed under the MIT License. See `LICENSE` for more information.
+`duiker` is distributed under the MIT License. See `LICENSE` for more information.
 
 ---
 

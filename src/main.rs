@@ -1,13 +1,13 @@
 use clap::{Parser, Subcommand, ValueEnum};
-use rdirstat::output::formatters::{JsonFormatter, OutputFormatter, TreeFormatter};
-use rdirstat::scanner::{ScanConfig, Scanner};
+use duiker::output::formatters::{JsonFormatter, OutputFormatter, TreeFormatter};
+use duiker::scanner::{ScanConfig, Scanner};
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "rdirstat")]
+#[command(name = "duiker")]
 #[command(about = "A modern, high-performance disk usage analyzer")]
-#[command(version = "0.1.0")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
     /// One or more files or directories to scan.
     #[arg(value_name = "PATH")]
@@ -93,7 +93,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Some(Commands::Interactive { path }) => {
-            rdirstat::ui::tui::run_app(path, config)?;
+            duiker::ui::tui::run_app(path, config)?;
         }
         Some(Commands::Export {
             format,

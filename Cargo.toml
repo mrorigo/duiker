@@ -1,8 +1,8 @@
 [package]
-name = "rdirstat"
+name = "duiker"
 version = "0.1.0"
 edition = "2021"
-description = "A modern, high-performance disk usage analyzer"
+description = "A fast, honest disk usage analyzer for the terminal"
 license = "MIT OR Apache-2.0"
 
 [dependencies]

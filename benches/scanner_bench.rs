@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use rdirstat::scanner::{ScanConfig, Scanner};
+use duiker::scanner::{ScanConfig, Scanner};
 use tempfile::TempDir;
 
 fn create_test_directory() -> TempDir {
