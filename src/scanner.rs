@@ -17,6 +17,7 @@ pub struct ScanConfig {
     pub follow_links: bool,
     pub max_depth: Option<usize>,
     pub ignore_hidden: bool,
+    pub respect_ignore_files: bool,
     pub ignore_patterns: Vec<String>,
     pub num_threads: Option<usize>,
 }
@@ -27,6 +28,7 @@ impl Default for ScanConfig {
             follow_links: false,
             max_depth: None,
             ignore_hidden: true,
+            respect_ignore_files: false,
             ignore_patterns: Vec::new(),
             num_threads: None,
         }
@@ -127,8 +129,14 @@ impl Scanner {
         report_progress: ProgressCallback,
     ) -> Vec<FileEntry> {
         let mut walker_builder = WalkBuilder::new(path);
+        let respect_ignore_files = config.respect_ignore_files;
         walker_builder
             .hidden(config.ignore_hidden)
+            .ignore(respect_ignore_files)
+            .git_ignore(respect_ignore_files)
+            .git_global(respect_ignore_files)
+            .git_exclude(respect_ignore_files)
+            .parents(respect_ignore_files)
             .follow_links(config.follow_links)
             .max_depth(config.max_depth)
             .threads(config.num_threads.unwrap_or_else(num_cpus::get));
@@ -332,6 +340,28 @@ mod tests {
             .unwrap();
 
         assert_eq!(tree.total_files, 1);
+    }
+
+    #[test]
+    fn does_not_honor_gitignore_by_default() {
+        let directory = tempdir().unwrap();
+        std::fs::create_dir(directory.path().join(".git")).unwrap();
+        std::fs::write(directory.path().join(".gitignore"), "/target\n").unwrap();
+        std::fs::create_dir(directory.path().join("target")).unwrap();
+        std::fs::write(directory.path().join("target/big.bin"), vec![0u8; 4096]).unwrap();
+
+        let default_tree = Scanner::new(ScanConfig::default())
+            .scan(directory.path())
+            .unwrap();
+        assert_eq!(default_tree.total_files, 1);
+
+        let respecting_tree = Scanner::new(ScanConfig {
+            respect_ignore_files: true,
+            ..Default::default()
+        })
+        .scan(directory.path())
+        .unwrap();
+        assert_eq!(respecting_tree.total_files, 0);
     }
 
     #[test]

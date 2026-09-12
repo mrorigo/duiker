@@ -23,6 +23,11 @@ struct Cli {
     #[arg(short = 'H', long = "hidden")]
     include_hidden: bool,
 
+    /// Respect .gitignore, .ignore, and Git's global/exclude rules. Off by
+    /// default so scans report every file on disk.
+    #[arg(long = "respect-ignore-files", alias = "gitignore")]
+    respect_ignore_files: bool,
+
     /// Limit filesystem traversal; truncated scans produce incomplete totals.
     #[arg(long = "scan-depth", alias = "max-depth")]
     scan_depth: Option<usize>,
@@ -86,6 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = ScanConfig {
         follow_links: cli.follow_links,
         ignore_hidden: !cli.include_hidden,
+        respect_ignore_files: cli.respect_ignore_files,
         max_depth: cli.scan_depth,
         num_threads: cli.threads,
         ..Default::default()
