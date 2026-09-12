@@ -37,7 +37,7 @@ This tool does the same to your filesystem. `duiker` dives headfirst into your d
     -   Limit reported tree depth (`--max-reporting-depth`, default 3).
     -   Optionally limit filesystem traversal (`--scan-depth`); omitted by default.
     -   Adjust thread count (`--threads`).
-    -   (Future: Custom ignore patterns via `.gitignore` or similar mechanism).
+    -   Honor `.gitignore` and `.ignore` files when explicitly requested (`--respect-ignore-files`, off by default).
 -   **Human-Readable Output:** Sizes are displayed in intuitive units (KB, MB, GB, etc.).
 -   **JSON Export:** Programmatically access scan results for scripting and integration.
 
@@ -142,6 +142,7 @@ duiker [OPTIONS] [PATH]...
 | `-d`  | `--max-reporting-depth <INT>` | Maximum depth shown in human-readable tree output. | `3` |
 |       | `--scan-depth <INT>` | Maximum filesystem traversal depth; truncated totals are incomplete. | Unlimited |
 | `-t`  | `--threads <INT>` | Number of threads to use for scanning.       | `num_cpus`   |
+|       | `--respect-ignore-files` | Honor `.gitignore`, `.ignore`, and Git global/exclude rules during scans. | `false` |
 |       | `--color <MODE>` | Colour output: `auto`, `always`, or `never`. | `auto`       |
 
 **Example: Limit displayed depth, include hidden files, then output JSON**
@@ -212,7 +213,6 @@ Outputs a JSON object for one path, or an array of objects when multiple paths a
 
 -   Full JSON export of the entire file tree.
 -   TUI actions such as copying a selected path or opening it in the host file manager.
--   Integration with `.gitignore` for automatic ignore patterns.
 -   Support for Windows (currently Unix-specific for `dev()` and `ino()`).
 -   Configurable size units (binary/decimal).
 -   More sophisticated Treemap visualization within the TUI.

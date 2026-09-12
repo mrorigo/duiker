@@ -1,6 +1,6 @@
 [package]
 name = "duiker"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A fast, honest disk usage analyzer for the terminal"
 license = "MIT OR Apache-2.0"
